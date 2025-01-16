@@ -8,7 +8,7 @@ const path = require("path");
 
 module.exports = {
   mode: "production",
-  entry: "./src/index.js", // adapt this path to your main JS
+  entry: "./index.js", // adapt this path to your main JS
   output: {
     filename: "bundle.js",
     path: path.resolve(__dirname, "../dist"),
