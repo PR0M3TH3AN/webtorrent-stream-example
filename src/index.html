@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>WebTorrent Streaming Demo</title>
+    <style>
+      body {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 20px;
+        font-family: system-ui, -apple-system, sans-serif;
+        background: #f5f5f5;
+      }
+
+      .player-container {
+        background: #000;
+        border-radius: 8px;
+        overflow: hidden;
+        margin: 20px 0;
+      }
+
+      video {
+        width: 100%;
+        max-height: 540px;
+        display: block;
+      }
+
+      .stats {
+        background: #fff;
+        padding: 15px;
+        border-radius: 8px;
+        margin-top: 20px;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      .progress-bar {
+        background: #ddd;
+        height: 4px;
+        border-radius: 2px;
+        margin: 10px 0;
+        overflow: hidden;
+      }
+
+      .progress-bar-fill {
+        background: #2196f3;
+        height: 100%;
+        width: 0%;
+        transition: width 0.3s ease;
+      }
+
+      .stat-item {
+        display: flex;
+        justify-content: space-between;
+        padding: 5px 0;
+        border-bottom: 1px solid #eee;
+      }
+
+      .stat-item:last-child {
+        border-bottom: none;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>WebTorrent Streaming Demo</h1>
+    <div class="player-container">
+      <video id="videoPlayer" controls></video>
+    </div>
+    <div class="progress-bar">
+      <div id="progressBar" class="progress-bar-fill"></div>
+    </div>
+    <div class="stats">
+      <div class="stat-item">
+        <span>Status:</span>
+        <span id="status">Initializing...</span>
+      </div>
+      <div class="stat-item">
+        <span>Connected Peers:</span>
+        <span id="peers">0</span>
+      </div>
+      <div class="stat-item">
+        <span>Download Speed:</span>
+        <span id="downloadSpeed">0 B/s</span>
+      </div>
+      <div class="stat-item">
+        <span>Progress:</span>
+        <span id="progress">0%</span>
+      </div>
+      <div class="stat-item">
+        <span>Buffer:</span>
+        <span id="buffered">0%</span>
+      </div>
+    </div>
+
+    <script src="./js/webtorrent.min.js"></script>
+    <script>
+      // Initialize WebTorrent client
+      const client = new WebTorrent();
+
+      // UI Elements
+      const videoPlayer = document.getElementById("videoPlayer");
+      const progressBar = document.getElementById("progressBar");
+      const statusElement = document.getElementById("status");
+      const peersElement = document.getElementById("peers");
+      const downloadSpeedElement = document.getElementById("downloadSpeed");
+      const progressElement = document.getElementById("progress");
+      const bufferedElement = document.getElementById("buffered");
+
+      // Helper function to format bytes
+      function formatBytes(bytes) {
+        if (bytes === 0) return "0 B/s";
+        const sizes = ["B/s", "KB/s", "MB/s", "GB/s"];
+        const i = Math.floor(Math.log(bytes) / Math.log(1024));
+        return `${(bytes / Math.pow(1024, i)).toFixed(2)} ${sizes[i]}`;
+      }
+
+      // Update stats every second
+      function updateStats(torrent) {
+        setInterval(() => {
+          peersElement.textContent = torrent.numPeers;
+          downloadSpeedElement.textContent = formatBytes(torrent.downloadSpeed);
+          const progress = (torrent.progress * 100).toFixed(1);
+          progressElement.textContent = `${progress}%`;
+          progressBar.style.width = `${progress}%`;
+
+          // Calculate buffer progress
+          if (videoPlayer.buffered.length > 0) {
+            const bufferedEnd = videoPlayer.buffered.end(
+              videoPlayer.buffered.length - 1
+            );
+            const duration = videoPlayer.duration;
+            const bufferedPercent = ((bufferedEnd / duration) * 100).toFixed(1);
+            bufferedElement.textContent = `${bufferedPercent}%`;
+          }
+        }, 1000);
+      }
+
+      // Start streaming
+      async function initializeStreaming() {
+        statusElement.textContent = "Initializing service worker...";
+
+        try {
+          // Register service worker
+          await navigator.serviceWorker.register("sw.min.js");
+          const registration = await navigator.serviceWorker.ready;
+          client.createServer({ controller: registration });
+
+          statusElement.textContent = "Connecting to peers...";
+
+          // Read magnet URI from file
+          const magnetResponse = await window.fs.readFile("magnet-config", {
+            encoding: "utf8",
+          });
+          const magnetURI = magnetResponse.trim(); // Remove any whitespace
+          console.log("Loaded magnet URI:", magnetURI);
+
+          // Add the torrent and start streaming
+          client.add(magnetURI, (torrent) => {
+            statusElement.textContent = "Starting stream...";
+
+            // Find the video file
+            const file = torrent.files.find(
+              (file) =>
+                file.name.endsWith(".mp4") ||
+                file.name.endsWith(".webm") ||
+                file.name.endsWith(".mkv")
+            );
+
+            if (!file) {
+              statusElement.textContent = "Error: No video file found";
+              return;
+            }
+
+            // Stream the file
+            file.streamTo(videoPlayer);
+
+            // Update UI
+            statusElement.textContent = "Streaming";
+            updateStats(torrent);
+
+            // Handle events
+            videoPlayer.addEventListener("waiting", () => {
+              statusElement.textContent = "Buffering...";
+            });
+
+            videoPlayer.addEventListener("playing", () => {
+              statusElement.textContent = "Playing";
+            });
+
+            torrent.on("error", (err) => {
+              statusElement.textContent = `Error: ${err.message}`;
+            });
+          });
+        } catch (err) {
+          statusElement.textContent = `Error: ${err.message}`;
+          console.error("Streaming error:", err);
+        }
+      }
+
+      // Start streaming as soon as the page loads
+      initializeStreaming();
+    </script>
+  </body>
+</html>
