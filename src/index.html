@@ -92,11 +92,9 @@
       </div>
     </div>
 
-    <script src="./js/webtorrent.min.js"></script>
+    <!-- Include webtorrent from local file -->
+    <script src="js/webtorrent.min.js"></script>
     <script>
-      // Initialize WebTorrent client
-      const client = new WebTorrent();
-
       // UI Elements
       const videoPlayer = document.getElementById("videoPlayer");
       const progressBar = document.getElementById("progressBar");
@@ -123,7 +121,6 @@
           progressElement.textContent = `${progress}%`;
           progressBar.style.width = `${progress}%`;
 
-          // Calculate buffer progress
           if (videoPlayer.buffered.length > 0) {
             const bufferedEnd = videoPlayer.buffered.end(
               videoPlayer.buffered.length - 1
@@ -135,30 +132,37 @@
         }, 1000);
       }
 
-      // Start streaming
-      async function initializeStreaming() {
-        statusElement.textContent = "Initializing service worker...";
+      async function startStreaming() {
+        statusElement.textContent = "Initializing...";
 
         try {
+          // Initialize WebTorrent client
+          const client = new WebTorrent();
+          console.log("WebTorrent client created");
+
           // Register service worker
+          statusElement.textContent = "Initializing service worker...";
           await navigator.serviceWorker.register("sw.min.js");
           const registration = await navigator.serviceWorker.ready;
           client.createServer({ controller: registration });
+          console.log("Service worker registered");
+
+          // Read magnet link
+          statusElement.textContent = "Reading magnet URI...";
+          const magnetResponse = await window.fs.readFile("magnet-link.txt", {
+            encoding: "utf8",
+          });
+          const magnetURI = magnetResponse.trim();
+          console.log("Loaded magnet URI");
 
           statusElement.textContent = "Connecting to peers...";
 
-          // Read magnet URI from file
-          const magnetResponse = await window.fs.readFile("magnet-config", {
-            encoding: "utf8",
-          });
-          const magnetURI = magnetResponse.trim(); // Remove any whitespace
-          console.log("Loaded magnet URI:", magnetURI);
-
-          // Add the torrent and start streaming
+          // Add the torrent
           client.add(magnetURI, (torrent) => {
+            console.log("Torrent added");
             statusElement.textContent = "Starting stream...";
 
-            // Find the video file
+            // Find video file
             const file = torrent.files.find(
               (file) =>
                 file.name.endsWith(".mp4") ||
@@ -171,14 +175,15 @@
               return;
             }
 
-            // Stream the file
+            // Stream to video player
             file.streamTo(videoPlayer);
+            console.log("Streaming started");
 
-            // Update UI
+            // Set up UI
             statusElement.textContent = "Streaming";
             updateStats(torrent);
 
-            // Handle events
+            // Handle player events
             videoPlayer.addEventListener("waiting", () => {
               statusElement.textContent = "Buffering...";
             });
@@ -189,16 +194,17 @@
 
             torrent.on("error", (err) => {
               statusElement.textContent = `Error: ${err.message}`;
+              console.error("Torrent error:", err);
             });
           });
         } catch (err) {
           statusElement.textContent = `Error: ${err.message}`;
-          console.error("Streaming error:", err);
+          console.error("Fatal error:", err);
         }
       }
 
-      // Start streaming as soon as the page loads
-      initializeStreaming();
+      // Start streaming when page loads
+      startStreaming();
     </script>
   </body>
 </html>
