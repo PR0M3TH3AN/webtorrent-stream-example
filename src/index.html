@@ -92,8 +92,15 @@
       </div>
     </div>
 
-    <!-- Include webtorrent from local file -->
-    <script src="js/webtorrent.min.js"></script>
+    <!-- Load WebTorrent -->
+    <script type="module">
+      // Import WebTorrent and make it globally available
+      import WebTorrent from "./js/webtorrent.min.js";
+      window.WebTorrent = WebTorrent;
+      console.log("WebTorrent loaded:", typeof window.WebTorrent);
+    </script>
+
+    <!-- Main application code -->
     <script>
       // UI Elements
       const videoPlayer = document.getElementById("videoPlayer");
