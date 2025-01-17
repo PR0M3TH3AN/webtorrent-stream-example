@@ -6,7 +6,6 @@ this is a new file that imports the local webtorrent library
 
 import WebTorrent from "./js/webtorrent.min.js";
 
-// replicate the streaming logic in your index.html script
 (async function main() {
   console.log("[App] Starting application...");
 
@@ -14,111 +13,100 @@ import WebTorrent from "./js/webtorrent.min.js";
   const videoPlayer = document.getElementById("videoPlayer");
 
   try {
-    console.log("[App] Initializing service worker registration...");
-    statusElement.textContent = "Initializing service worker...";
-    await navigator.serviceWorker.register("sw.min.js");
-    const registration = await navigator.serviceWorker.ready;
-    console.log("[App] Service worker ready. Creating WebTorrent server...");
+    console.log("[App] Registering service worker...");
+    const reg = await navigator.serviceWorker.register("./sw.min.js", {
+      scope: "./",
+    });
+    await navigator.serviceWorker.ready;
 
+    if (!navigator.serviceWorker.controller) {
+      console.log("[App] SW not controlling this page yet. Reloading...");
+      location.reload();
+      return;
+    }
+    console.log(
+      "[App] Service worker controlling page:",
+      navigator.serviceWorker.controller.scriptURL
+    );
+
+    statusElement.textContent = "Initializing WebTorrent...";
     const client = new WebTorrent();
-    client.createServer({ controller: registration });
 
-    statusElement.textContent = "Reading magnet URI...";
-    console.log("[App] Fetching magnet URI from magnet-link.txt...");
-    const magnetResponse = await fetch("magnet-link.txt");
-    const magnetURI = (await magnetResponse.text()).trim();
-    console.log("[App] Successfully fetched magnet URI:", magnetURI);
+    // (A) Create the server to handle range requests
+    // This sets up the *internal* message handler to respond with "STREAM" data
+    client.createServer({ controller: reg });
 
-    statusElement.textContent = "Connecting to peers...";
-    console.log("[App] Adding torrent to WebTorrent client...");
-    const torrent = client.add(magnetURI);
-
-    // Additional torrent events:
-    torrent.on("infoHash", () => {
-      console.log("[Torrent] infoHash event. infoHash:", torrent.infoHash);
-    });
-
-    torrent.on("metadata", () => {
-      console.log("[Torrent] metadata event. Name:", torrent.name);
-      console.log("[Torrent] Number of files:", torrent.files.length);
-    });
-
-    torrent.on("ready", () => {
-      console.log(
-        "[Torrent] ready event. Attempting to select a playable file."
-      );
-    });
-
-    torrent.on("done", () => {
-      console.log("[Torrent] done event. All data downloaded.");
-    });
-
-    // Listen for when a new peer is connected (wire)
-    torrent.on("wire", (wire, infoHash) => {
-      console.log(
-        `[Torrent] New wire connected for ${infoHash}. Peer address: ${wire.remoteAddress}`
-      );
-    });
-
-    // Listen for download progress
-    torrent.on("download", (bytes) => {
-      console.log(
-        `[Torrent] Download chunk: ${bytes} bytes. ` +
-          `Total downloaded: ${torrent.downloaded}/${torrent.length}. ` +
-          `Connected peers: ${torrent.numPeers}. ` +
-          `Progress: ${(torrent.progress * 100).toFixed(2)}%`
-      );
-    });
-
-    // Trackers – see if announces are happening
-    torrent.on("trackerAnnounce", () => {
-      console.log("[Torrent] trackerAnnounce event. Current tracker stats:", {
-        announce: torrent.announce,
-        tracker: torrent.tracker
-          ? torrent.tracker.wrtcSupport
-            ? "WebRTC supported"
-            : "No WebRTC"
-          : "No tracker object",
-      });
-    });
-
-    // If after a while we never get metadata, assume no WebRTC seeder
-    setTimeout(() => {
-      if (!torrent.metadata) {
+    // (B) *Also* manually add a fallback message listener if createServer isn't hooking up
+    function onSWMessage(evt) {
+      const data = evt.data;
+      if (!data || data.type !== "webtorrent") return;
+      // Hand it off to the internal method that crafts "body: 'STREAM'" responses
+      if (typeof client._onServiceWorkerRequest === "function") {
+        client._onServiceWorkerRequest(data, evt.ports[0]);
+      } else {
+        // Fallback: if your version doesn't have _onServiceWorkerRequest,
+        // we must implement the "STREAM" logic ourselves (see fallback below).
         console.warn(
-          "[Torrent] Still no metadata. This usually means no WebRTC peers " +
-            "are seeding the torrent. Ensure it's seeded by a client that supports WebRTC."
+          "[App] No client._onServiceWorkerRequest found - fallback needed."
         );
       }
-    }, 15000);
+    }
+    window.addEventListener("message", onSWMessage);
 
-    // When the torrent finishes parsing metadata, add a callback to stream the file
+    // (C) Now proceed with adding the torrent
+    statusElement.textContent = "Reading magnet URI...";
+    const magnetResponse = await fetch("magnet-link.txt");
+    const magnetURI = (await magnetResponse.text()).trim();
+    console.log("[App] Magnet URI:", magnetURI);
+
+    statusElement.textContent = "Connecting to peers...";
+    const torrent = client.add(magnetURI);
+
+    torrent.on("infoHash", () =>
+      console.log("[Torrent] infoHash:", torrent.infoHash)
+    );
+    torrent.on("metadata", () => {
+      console.log("[Torrent] metadata event. Name:", torrent.name);
+      console.log(
+        "[Torrent] files:",
+        torrent.files.map((f) => f.name)
+      );
+    });
+    torrent.on("ready", () => console.log("[Torrent] ready event."));
+    torrent.on("done", () =>
+      console.log("[Torrent] done event. All data downloaded.")
+    );
+
+    // Show chunk progress logs
+    torrent.on("download", (bytes) => {
+      console.log(
+        `[Torrent] Downloaded chunk: ${bytes} bytes, total: ${
+          torrent.downloaded
+        }/${torrent.length}, progress: ${(torrent.progress * 100).toFixed(2)}%`
+      );
+    });
+
+    // When torrent metadata loads, pick a file to stream
     torrent.on("metadata", () => {
       statusElement.textContent = "Starting stream...";
-      const file = torrent.files.find(
-        (f) =>
+      const file = torrent.files.find((f) => {
+        return (
           f.name.endsWith(".mp4") ||
           f.name.endsWith(".webm") ||
           f.name.endsWith(".mkv")
-      );
+        );
+      });
 
       if (!file) {
-        const msg = "Error: No video file found in torrent!";
-        statusElement.textContent = msg;
-        console.error("[Torrent]", msg);
+        statusElement.textContent = "No video file found in torrent!";
         return;
       }
-
-      console.log(`[Torrent] Selected file for streaming: ${file.name}`);
-      console.log("[Torrent] Streaming file to HTML video element...");
+      console.log("[Torrent] streaming file:", file.name);
       file.streamTo(videoPlayer);
-
       statusElement.textContent = "Streaming";
-      console.log("[Torrent] Streaming started; waiting for video to buffer.");
     });
   } catch (err) {
-    const msg = `Error: ${err.message}`;
-    statusElement.textContent = msg;
+    statusElement.textContent = `Error: ${err.message}`;
     console.error("[App]", err);
   }
 })();

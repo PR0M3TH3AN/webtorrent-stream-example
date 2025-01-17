@@ -87,5 +87,10 @@
 
     <!-- Instead of inlining the entire script, we load the bundled file -->
     <script src="./bundle.js"></script>
+
+    <!-- 
+      DO NOT load the service worker directly with a script tag.
+      We only register it in the JS code. 
+    -->
   </body>
 </html>
