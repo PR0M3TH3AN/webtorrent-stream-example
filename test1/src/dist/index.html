@@ -57,7 +57,8 @@
   <body>
     <h1>WebTorrent Streaming Demo</h1>
     <div class="player-container">
-      <video id="videoPlayer" controls></video>
+      <!-- NOTE: we add autoplay + muted here -->
+      <video id="videoPlayer" controls autoplay muted></video>
     </div>
     <div class="progress-bar">
       <div id="progressBar" class="progress-bar-fill"></div>
@@ -85,12 +86,6 @@
       </div>
     </div>
 
-    <!-- Instead of inlining the entire script, we load the bundled file -->
     <script src="./bundle.js"></script>
-
-    <!-- 
-      DO NOT load the service worker directly with a script tag.
-      We only register it in the JS code. 
-    -->
   </body>
 </html>
